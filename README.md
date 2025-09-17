@@ -58,6 +58,8 @@ export PROJECT_ID
 # Dataset and model configuration
 export BQ_DATASET="${BQ_DATASET:-demo_diabetes}"
 export BQ_LOCATION="${BQ_LOCATION:-US}"
+export LOCATION="${LOCATION:-us-central1}"
+
 export GCS_URI="${GCS_URI:-gs://class-demo/diabetes_prediction_dataset.csv}"
 
 # Table and model names
@@ -67,7 +69,7 @@ export MODEL_NAME="${BQ_DATASET}.diabetes_model"
 echo "✓ Environment configured:"
 echo "  PROJECT_ID: ${PROJECT_ID}"
 echo "  DATASET: ${BQ_DATASET}"
-echo "  LOCATION: ${BQ_LOCATION}"
+echo "  BQ_LOCATION: ${BQ_LOCATION}"
 echo ""
 echo "Ready to proceed with demo setup!"
 EOS
@@ -144,15 +146,6 @@ OPTIONS (
 SELECT 
   * 
 FROM `demo_diabetes.diabetes_raw`;
-
--- Quick check of what BQML did with our data
-SELECT 
-  diabetes,
-  COUNT(*) as count,
-  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
-FROM ML.TRAINING_INFO(MODEL `demo_diabetes.diabetes_model`)
-GROUP BY diabetes
-ORDER BY diabetes;
 ```
 
 **What this does:** 
@@ -163,8 +156,6 @@ ORDER BY diabetes;
 - Training typically completes in 10-30 seconds
 
 **Key point for the demo:** "Notice we're training directly on raw data - no data cleaning or feature engineering needed. BQML handles all of that automatically!"
-
-### Step 6: Evaluate Model Performance
 
 ### Step 6: Evaluate Model Performance
 
@@ -194,28 +185,11 @@ WHERE processed_input != '__INTERCEPT__'
 ORDER BY ABS(weight) DESC
 LIMIT 10;
 
--- 3. Confusion matrix at default threshold (0.5)
-WITH predictions AS (
-  SELECT 
-    diabetes as actual_label,
-    predicted_diabetes as predicted_label
-  FROM ML.PREDICT(MODEL `demo_diabetes.diabetes_model`, 
-    (SELECT * FROM `demo_diabetes.diabetes_raw`))
-)
-SELECT 
-  CASE actual_label WHEN 1 THEN 'Has Diabetes' ELSE 'No Diabetes' END as actual,
-  CASE predicted_label WHEN 1 THEN 'Has Diabetes' ELSE 'No Diabetes' END as predicted,
-  COUNT(*) as count
-FROM predictions
-GROUP BY actual_label, predicted_label
-ORDER BY actual_label DESC, predicted_label DESC;
 ```
 
 **Expected results:**
 - AUC-ROC around 0.85-0.95 (excellent discrimination)
 - Top features likely include: HbA1c_level, blood_glucose_level, age, BMI
-- Model should identify ~70-80% of diabetes cases (recall)
-
 ---
 
 ## Part 3: Test Direct Model Predictions
@@ -321,7 +295,7 @@ cd ~/mlb-agent-lab/workspace
 
 # Create the agent with ADK
 adk create \
-  --model gemini-2.0-flash-exp \
+  --model gemini-2.5-flash \
   --project $PROJECT_ID \
   --region $LOCATION \
   diabetes_agent
@@ -396,16 +370,16 @@ Diabetes Risk Assessment Agent - Educational healthcare assistant
 """
 
 from google.adk.agents import Agent
-from google.adk.tools import Tool
+from google.adk.tools import google_search
 from prompts import AGENT_DESCRIPTION, AGENT_INSTRUCTIONS
 
 # Create the agent with Google Search capability
 root_agent = Agent(
     name="diabetes_agent",
-    model="gemini-2.0-flash-exp",
+    model="gemini-2.5-flash",
     description=AGENT_DESCRIPTION,
     instruction=AGENT_INSTRUCTIONS,
-    tools=[Tool.google_search()],  # Add Google Search tool
+    tools=[google_search],  # Add Google Search tool
 )
 
 # Debug output when run directly
@@ -425,7 +399,7 @@ cd ~/mlb-agent-lab/workspace
 python -m diabetes_agent.agent
 ```
 
-### Step 11: Add BigQuery Access
+### Step 11: Add BigQuery Access and Update Agent
 
 Now let's give the agent access to our BigQuery data. First, create a BigQuery tool configuration:
 
@@ -433,222 +407,245 @@ Now let's give the agent access to our BigQuery data. First, create a BigQuery t
 cd diabetes_agent
 
 # Create bigquery_tools.py
-cat > bigquery_tools.py <<'EOF'
-"""
-BigQuery tools for accessing diabetes data and model
-"""
-
-import os
-from typing import Dict, Any
-from google.cloud import bigquery
-from google.adk.tools import Tool
-
-PROJECT_ID = os.environ.get('PROJECT_ID')
-DATASET_ID = 'demo_diabetes'
-
-def analyze_diabetes_data(query: str) -> str:
-    """
-    Execute a SQL query against the diabetes dataset.
-    
-    Args:
-        query: SQL query to run against the demo_diabetes dataset
-    
-    Returns:
-        Query results as a formatted string
-    """
-    client = bigquery.Client(project=PROJECT_ID)
-    
-    # Add safety check for dataset
-    if DATASET_ID not in query:
-        query = query.replace('FROM ', f'FROM `{PROJECT_ID}.{DATASET_ID}.')
-    
-    try:
-        query_job = client.query(query)
-        results = query_job.result()
-        
-        # Format results
-        rows = list(results)
-        if not rows:
-            return "No results found."
-        
-        # Convert to readable format
-        output = []
-        for row in rows[:10]:  # Limit to 10 rows for readability
-            output.append(str(dict(row)))
-        
-        return "\n".join(output)
-    except Exception as e:
-        return f"Query error: {str(e)}"
-
-def predict_diabetes_risk(
-    gender: str,
-    age: float,
-    hypertension: int,
-    heart_disease: int,
-    smoking_history: str,
-    bmi: float,
-    hba1c: float = 5.7,
-    blood_glucose: int = 100
-) -> str:
-    """
-    Predict diabetes risk using the trained model.
-    
-    Args:
-        gender: 'Male' or 'Female'
-        age: Age in years
-        hypertension: 0 (No) or 1 (Yes)
-        heart_disease: 0 (No) or 1 (Yes)
-        smoking_history: 'never', 'former', 'current', etc.
-        bmi: Body Mass Index
-        hba1c: HbA1c level (default 5.7 if unknown)
-        blood_glucose: Blood glucose level (default 100 if unknown)
-    
-    Returns:
-        Risk assessment with probability and category
-    """
-    client = bigquery.Client(project=PROJECT_ID)
-    
-    query = f"""
-    SELECT 
-        ROUND(predicted_diabetes_probs[OFFSET(1)].prob * 100, 1) AS diabetes_probability_pct,
-        CASE 
-            WHEN predicted_diabetes_probs[OFFSET(1)].prob < 0.3 THEN 'Low Risk'
-            WHEN predicted_diabetes_probs[OFFSET(1)].prob < 0.7 THEN 'Moderate Risk'
-            ELSE 'High Risk'
-        END AS risk_category
-    FROM ML.PREDICT(
-        MODEL `{PROJECT_ID}.{DATASET_ID}.diabetes_model`,
-        (SELECT 
-            '{gender}' as gender,
-            {age} as age,
-            {hypertension} as hypertension,
-            {heart_disease} as heart_disease,
-            '{smoking_history}' as smoking_history,
-            {bmi} as bmi,
-            {hba1c} as HbA1c_level,
-            {blood_glucose} as blood_glucose_level
-        )
-    )
-    """
-    
-    try:
-        query_job = client.query(query)
-        results = list(query_job.result())
-        
-        if results:
-            row = results[0]
-            return (f"Risk Assessment:\n"
-                   f"- Probability: {row['diabetes_probability_pct']}%\n"
-                   f"- Category: {row['risk_category']}\n"
-                   f"- Note: This is for educational purposes only")
-        return "Unable to calculate risk."
-    except Exception as e:
-        return f"Prediction error: {str(e)}"
-
-def get_dataset_statistics() -> str:
-    """
-    Get basic statistics about the diabetes dataset.
-    
-    Returns:
-        Summary statistics about the dataset
-    """
-    client = bigquery.Client(project=PROJECT_ID)
-    
-    query = f"""
-    SELECT 
-        COUNT(*) as total_records,
-        ROUND(AVG(CASE WHEN diabetes = 1 THEN 100.0 ELSE 0 END), 1) as diabetes_percentage,
-        ROUND(AVG(age), 1) as avg_age,
-        ROUND(AVG(bmi), 1) as avg_bmi,
-        ROUND(AVG(HbA1c_level), 1) as avg_hba1c
-    FROM `{PROJECT_ID}.{DATASET_ID}.diabetes_raw`
-    """
-    
-    try:
-        query_job = client.query(query)
-        results = list(query_job.result())
-        
-        if results:
-            row = results[0]
-            return (f"Dataset Statistics:\n"
-                   f"- Total records: {row['total_records']:,}\n"
-                   f"- Diabetes prevalence: {row['diabetes_percentage']}%\n"
-                   f"- Average age: {row['avg_age']} years\n"
-                   f"- Average BMI: {row['avg_bmi']}\n"
-                   f"- Average HbA1c: {row['avg_hba1c']}%")
-        return "Unable to retrieve statistics."
-    except Exception as e:
-        return f"Query error: {str(e)}"
-EOF
-```
-
-### Step 12: Update Agent with All Tools
-
-Update the agent to include BigQuery tools:
-
-```bash
-# Update agent.py to include BigQuery tools
 cat > agent.py <<'EOF'
 """
 Diabetes Risk Assessment Agent - Educational healthcare assistant
 """
 
 from google.adk.agents import Agent
-from google.adk.tools import Tool
-from prompts import AGENT_DESCRIPTION, AGENT_INSTRUCTIONS
-from bigquery_tools import (
-    analyze_diabetes_data,
-    predict_diabetes_risk, 
-    get_dataset_statistics
+from google.adk.tools import google_search
+from .prompts import AGENT_DESCRIPTION, AGENT_INSTRUCTIONS
+# Add in BQ tool support
+from google.adk.tools.bigquery import BigQueryCredentialsConfig
+from google.adk.tools.bigquery import BigQueryToolset
+from google.adk.tools.bigquery.config import BigQueryToolConfig
+from google.adk.tools.bigquery.config import WriteMode
+from google.genai import types
+import google.auth
+from google.adk.tools.agent_tool import AgentTool
+
+# 1) Application Default Credentials (ADC) — run: gcloud auth application-default login
+adc, _ = google.auth.default()
+bq_creds = BigQueryCredentialsConfig(credentials=adc)
+
+# 2) Configure the BigQuery toolset (BLOCKED prevents writes while you test)
+bq_cfg = BigQueryToolConfig(write_mode=WriteMode.BLOCKED)
+bigquery_toolset = BigQueryToolset(
+    credentials_config=bq_creds,
+    bigquery_tool_config=bq_cfg,
 )
 
-# Enhanced instructions for data-aware agent
-ENHANCED_INSTRUCTIONS = AGENT_INSTRUCTIONS + """
 
-DATA ACCESS:
-You have access to a BigQuery dataset (demo_diabetes) with:
-- diabetes_raw: 100,000 patient records with demographics and clinical data
-- diabetes_model: Trained logistic regression model for risk prediction
+search_agent = Agent(
+    name="search_agent",
+    model="gemini-2.5-flash",
+    description="Google Search helper",
+    instruction="Use Google Search to find relevant diabetes related information.",
+    tools=[google_search],   # allowed: multiple search tools, if you add more
+)
 
-Use these tools:
-- get_dataset_statistics(): Overview of the dataset
-- analyze_diabetes_data(query): Run SQL queries for analysis
-- predict_diabetes_risk(): Calculate personalized risk scores
-- google_search(): Find current medical information
+search_tool = AgentTool(agent=search_agent)
 
-WORKFLOW FOR RISK ASSESSMENT:
-1. Greet warmly and explain you can provide an educational risk assessment
-2. Ask for information conversationally:
-   - Demographics (age, gender)
-   - Medical history (hypertension, heart disease)
-   - Lifestyle (smoking history, BMI)
-   - Lab values if known (HbA1c, blood glucose)
-3. Use reasonable defaults for missing values and explain them
-4. Run the prediction and interpret results supportively
-5. Provide 2-3 personalized recommendations
-6. Remind about consulting healthcare providers
-"""
-
-# Create the agent with all tools
+# Create the agent with Google Search capability
 root_agent = Agent(
     name="diabetes_agent",
-    model="gemini-2.0-flash-exp",
+    model="gemini-2.5-flash",
     description=AGENT_DESCRIPTION,
-    instruction=ENHANCED_INSTRUCTIONS,
-    tools=[
-        Tool.google_search(),
-        Tool.from_function(get_dataset_statistics),
-        Tool.from_function(analyze_diabetes_data),
-        Tool.from_function(predict_diabetes_risk),
-    ],
+    instruction=AGENT_INSTRUCTIONS,
+    tools=[bigquery_toolset, search_tool],  # Add Google Search tool
 )
 
+
+# Debug output when run directly
 if __name__ == "__main__":
     print(f"✅ Diabetes agent configured")
     print(f"📋 Name: {root_agent.name}")
     print(f"🧠 Model: {root_agent.model}")
     print(f"🛠️ Tools: {len(root_agent.tools)} configured")
-    print(f"📊 BigQuery dataset: demo_diabetes")
+EOF
+```
+
+### Step 12: Update Agent Instructions
+
+Update the agent to include BigQuery tools:
+
+```bash
+# Update agent.py to include BigQuery tools
+cat > prompts.py <<'EOF'
+"""
+Diabetes Risk Assessment Agent - Instructions and Configuration
+"""
+
+import os
+
+# Configuration
+PROJECT_ID = os.environ.get('PROJECT_ID', 'your-project-id')
+DATASET_ID = 'demo_diabetes'
+TVF_NAME = f"{DATASET_ID}.predict_diabetes"
+
+# Agent Description
+AGENT_DESCRIPTION = """
+An educational diabetes risk assessment assistant that combines evidence-based medical 
+information with data-driven insights from a validated prediction model. This agent 
+helps users understand diabetes risk factors and provides personalized educational 
+assessments while maintaining appropriate medical disclaimers.
+"""
+
+# Main Instructions
+AGENT_INSTRUCTIONS = f"""
+You are a knowledgeable and empathetic diabetes education assistant designed to help 
+users understand diabetes risk factors and provide educational risk assessments.
+
+## YOUR PERSONALITY
+- Warm, supportive, and encouraging
+- Clear and accessible in explanations
+- Professional yet approachable
+- Empathetic to health concerns
+- Focused on empowerment through education
+
+## YOUR CAPABILITIES
+
+### 1. BigQuery Analytics
+You have read-only access to the `{DATASET_ID}` dataset in project `{PROJECT_ID}` containing:
+- **diabetes_raw**: 100,000 patient records with clinical and demographic data
+- **diabetes_model**: Trained logistic regression model for risk prediction
+- **predict_diabetes**: Table-valued function for risk assessment
+
+Use BigQuery for:
+- Dataset statistics and distributions
+- Correlation analysis
+- Pattern identification
+- Risk predictions via the TVF
+
+### 2. Search Agent
+Use the search tool for:
+- Current medical guidelines
+- Evidence-based prevention strategies
+- General diabetes information
+- Treatment options and lifestyle recommendations
+
+Always cite reputable sources (CDC, WHO, Mayo Clinic, American Diabetes Association).
+
+## RISK ASSESSMENT WORKFLOW
+
+### Calling the Prediction Function
+The table-valued function `{TVF_NAME}` accepts 8 parameters in this exact order:
+1. gender (STRING): 'Male' or 'Female'
+2. age (FLOAT64): Age in years
+3. hypertension (INT64): 0=No, 1=Yes
+4. heart_disease (INT64): 0=No, 1=Yes
+5. smoking_history (STRING): 'never', 'former', 'current', etc.
+6. bmi (FLOAT64): Body Mass Index
+7. HbA1c_level (FLOAT64): Glycated hemoglobin percentage
+8. blood_glucose_level (INT64): Blood glucose in mg/dL
+
+### Query Pattern
+```sql
+SELECT 
+    prediction,
+    probability_of_diabetes,
+    risk_category
+FROM `{TVF_NAME}`(
+    <gender_or_NULL>,
+    <age_or_NULL>,
+    <hypertension_or_NULL>,
+    <heart_disease_or_NULL>,
+    <smoking_history_or_NULL>,
+    <bmi_or_NULL>,
+    <HbA1c_or_NULL>,
+    <blood_glucose_or_NULL>
+);
+```
+
+### Handling Missing Data
+- **ALWAYS proceed with available data** - the TVF handles NULL values gracefully
+- Pass NULL for any missing parameters
+- The function uses sensible defaults based on population averages
+- Only ask for clarification if the user explicitly requests precision
+- After prediction, briefly mention which values used defaults
+
+### Input Normalization
+Convert user inputs appropriately:
+- Yes/True/Y → 1, No/False/N → 0 for binary fields
+- Accept variations: "high blood pressure" → hypertension
+- Smoking: map to valid categories ('never', 'former', 'current')
+- Handle units: convert if needed (e.g., mmol/L to mg/dL for glucose)
+
+## RESPONSE GUIDELINES
+
+### For Risk Assessments
+1. Run the prediction with available data
+2. Present results clearly:
+   - Risk category (Low/Moderate/High)
+   - Probability as percentage (one decimal)
+   - Note any defaulted values
+3. Provide 2-3 relevant recommendations based on modifiable risk factors
+4. Include educational context about what the results mean
+5. Always end with the medical disclaimer
+
+### For Data Questions
+- Write efficient, readable SQL queries
+- Explain what the analysis shows
+- Keep results concise and interpretable
+- Focus on actionable insights
+
+### For General Questions
+- Provide evidence-based information
+- Use the search agent for current guidelines
+- Define medical terms simply
+- Include practical examples
+
+## IMPORTANT CONSTRAINTS
+
+### Medical Safety
+- This is an EDUCATIONAL tool only
+- Never diagnose or prescribe treatment
+- Always include this disclaimer:
+  "⚠️ This is an educational tool only. It is NOT medical advice. Please consult 
+  a healthcare provider for proper screening and medical guidance."
+- Encourage professional medical consultation for concerning results
+
+### Privacy
+- Never store personal health information
+- Don't ask for identifying details
+- Keep interactions anonymous
+
+### Conversation Management
+- Stay focused on diabetes-related topics
+- For off-topic questions, politely redirect:
+  "I'm specialized in diabetes education. For [topic], you might want to consult 
+  a specialist in that area. Is there anything about diabetes I can help you with?"
+
+## EXAMPLE INTERACTIONS
+
+### Minimal Information
+User: "What's my diabetes risk?"
+Assistant: "I can help assess your diabetes risk using available information. I'll use 
+population averages for any details you don't provide. Let me run an assessment..."
+[Run TVF with all NULLs, explain defaults used]
+
+### Partial Information  
+User: "I'm a 55-year-old woman with BMI of 28"
+Assistant: [Run TVF with provided values, NULLs for others]
+"Based on your age (55), gender (female), and BMI (28), with average values used for 
+other factors..."
+
+### Complete Information
+User: [Provides all 8 parameters]
+Assistant: [Run TVF with all values]
+"Based on your complete health profile, here's your personalized risk assessment..."
+
+## QUALITY STANDARDS
+- Accuracy: Verify medical facts before sharing
+- Clarity: Explain complex concepts simply
+- Empathy: Acknowledge health concerns compassionately
+- Action: Focus on what users can control
+- Hope: Emphasize that type 2 diabetes is often preventable
+
+Remember: You're not just providing data—you're empowering people with knowledge to make 
+informed health decisions. Every interaction should leave users better informed and more 
+confident about managing their health.
+"""
 EOF
 ```
 
@@ -657,7 +654,6 @@ EOF
 Start the ADK test interface:
 
 ```bash
-cd ~/mlb-agent-lab/workspace
 adk web
 ```
 
@@ -684,32 +680,6 @@ Can you assess my diabetes risk?
 ```
 Follow the conversational flow as the agent gathers information.
 
-### Step 14: Deploy the Agent (Optional)
-
-Deploy to Cloud Run for production access:
-
-```bash
-# Add requirements file
-cat > diabetes_agent/requirements.txt <<EOF
-google-adk
-google-cloud-aiplatform
-google-cloud-bigquery
-pandas
-EOF
-
-# Deploy to Cloud Run
-adk deploy cloud_run \
-  --project $PROJECT_ID \
-  --region $LOCATION \
-  --service_name diabetes-risk-agent \
-  --with_ui \
-  diabetes_agent
-
-# Update environment variables
-gcloud run services update diabetes-risk-agent \
-  --region $LOCATION \
-  --update-env-vars PROJECT_ID=$PROJECT_ID
-```
 
 ### What You've Built
 
