@@ -144,6 +144,15 @@ OPTIONS (
 SELECT 
   * 
 FROM `demo_diabetes.diabetes_raw`;
+
+-- Quick check of what BQML did with our data
+SELECT 
+  diabetes,
+  COUNT(*) as count,
+  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
+FROM ML.TRAINING_INFO(MODEL `demo_diabetes.diabetes_model`)
+GROUP BY diabetes
+ORDER BY diabetes;
 ```
 
 **What this does:** 
@@ -154,6 +163,8 @@ FROM `demo_diabetes.diabetes_raw`;
 - Training typically completes in 10-30 seconds
 
 **Key point for the demo:** "Notice we're training directly on raw data - no data cleaning or feature engineering needed. BQML handles all of that automatically!"
+
+### Step 6: Evaluate Model Performance
 
 ### Step 6: Evaluate Model Performance
 
@@ -182,11 +193,28 @@ FROM ML.WEIGHTS(MODEL `demo_diabetes.diabetes_model`)
 WHERE processed_input != '__INTERCEPT__'
 ORDER BY ABS(weight) DESC
 LIMIT 10;
+
+-- 3. Confusion matrix at default threshold (0.5)
+WITH predictions AS (
+  SELECT 
+    diabetes as actual_label,
+    predicted_diabetes as predicted_label
+  FROM ML.PREDICT(MODEL `demo_diabetes.diabetes_model`, 
+    (SELECT * FROM `demo_diabetes.diabetes_raw`))
+)
+SELECT 
+  CASE actual_label WHEN 1 THEN 'Has Diabetes' ELSE 'No Diabetes' END as actual,
+  CASE predicted_label WHEN 1 THEN 'Has Diabetes' ELSE 'No Diabetes' END as predicted,
+  COUNT(*) as count
+FROM predictions
+GROUP BY actual_label, predicted_label
+ORDER BY actual_label DESC, predicted_label DESC;
 ```
 
 **Expected results:**
 - AUC-ROC around 0.85-0.95 (excellent discrimination)
 - Top features likely include: HbA1c_level, blood_glucose_level, age, BMI
+- Model should identify ~70-80% of diabetes cases (recall)
 
 ---
 
@@ -217,7 +245,7 @@ FROM ML.PREDICT(
     'former' as smoking_history,
     28.5 as bmi,
     6.8 as HbA1c_level,
-    145 as blood_glucose_level
+    145 as blood_glucose_level  -- INT64, not FLOAT64
   )
 );
 
@@ -285,26 +313,17 @@ Now we'll create an intelligent agent that can discuss diabetes, analyze our dat
 
 ### Step 8: Create the Basic Agent Structure
 
-First, let's scaffold a basic agent using ADK. Start by installing the agent development kit (ADK):
+First, let's scaffold a basic agent using ADK:
 
 ```bash
-. activate.sh
-# Install ADK
-pip install google-adk
-# Do a quick test
-adk --version
-```
-
-With ADK installed, create a new agent:
-
-
-```bash
+# Ensure you're in the workspace directory
+cd ~/mlb-agent-lab/workspace
 
 # Create the agent with ADK
 adk create \
-  --model gemini-2.5-flash \
+  --model gemini-2.0-flash-exp \
   --project $PROJECT_ID \
-  --region us-central1 \
+  --region $LOCATION \
   diabetes_agent
 
 # Navigate to the new agent directory
@@ -371,7 +390,7 @@ Now let's update the agent to use our instructions and add Google Search for gen
 
 ```bash
 # Update agent.py
-cat > diabetes_agent/agent.py <<'EOF'
+cat > agent.py <<'EOF'
 """
 Diabetes Risk Assessment Agent - Educational healthcare assistant
 """
@@ -779,3 +798,4 @@ gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member="serviceAccount:adk-agent@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/bigquery.user"
 ```
+

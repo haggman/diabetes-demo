@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
-set -euo pipefail
+
+# Detect if script is being sourced
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  __ACTIVATE_SOURCED=1
+else
+  __ACTIVATE_SOURCED=0
+fi
+
+# Use strict mode only when executed, not when sourced
+if [[ "${__ACTIVATE_SOURCED}" -eq 0 ]]; then
+  set -euo pipefail
+fi
 
 # Auto-detect or reuse PROJECT_ID
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value core/project 2>/dev/null || true)}"
 if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "(unset)" ]]; then
   echo "ERROR: PROJECT_ID is not set. Run: export PROJECT_ID=<your-project-id>" >&2
-  return 1 2>/dev/null || exit 1
+  if [[ "${__ACTIVATE_SOURCED}" -eq 1 ]]; then
+    return 1
+  else
+    exit 1
+  fi
 fi
 export PROJECT_ID
 
@@ -16,9 +31,6 @@ export GCS_URI="${GCS_URI:-gs://class-demo/diabetes_prediction_dataset.csv}"
 
 # Table and model names
 export RAW_TABLE="${BQ_DATASET}.diabetes_raw"
-export TRAIN_TABLE="${BQ_DATASET}.diabetes_train"
-export MODEL_NAME="${BQ_DATASET}.diabetes_model"
-export PREDICTION_VIEW="${BQ_DATASET}.predict_diabetes"
 
 echo "✓ Environment configured:"
 echo "  PROJECT_ID: ${PROJECT_ID}"
