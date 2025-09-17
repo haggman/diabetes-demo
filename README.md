@@ -775,9 +775,10 @@ For life sciences companies, this means faster time to insights, reduced develop
 ## Additional Resources
 
 - **BigQuery ML Documentation**: https://cloud.google.com/bigquery-ml/docs
-- **ADK Documentation**: https://cloud.google.com/agent-development-kit
+- **ADK Documentation**: https://google.github.io/adk-docs/
 - **Healthcare & Life Sciences Solutions**: https://cloud.google.com/solutions/healthcare-life-sciences
-- **Sample Code Repository**: [Will be provided with complete examples]
+- **ADK Sample Code**: https://github.com/google/adk-samples
+- **Diabetes Prediction Dataset**: https://www.kaggle.com/datasets/iammustafatz/diabetes-prediction-dataset
 
 ---
 
