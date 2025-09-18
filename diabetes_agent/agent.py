@@ -46,6 +46,7 @@ root_agent = Agent(
 )
 
 
+
 # Debug output when run directly
 if __name__ == "__main__":
     print(f"✅ Diabetes agent configured")
