@@ -29,10 +29,11 @@ export BQ_DATASET="${BQ_DATASET:-demo_diabetes}"
 export BQ_LOCATION="${BQ_LOCATION:-US}"
 export GCS_URI="${GCS_URI:-gs://class-demo/diabetes_prediction_dataset.csv}"
 
-# Table and model names
+# Table
 export RAW_TABLE="${BQ_DATASET}.diabetes_raw"
 
 export STAGING_BUCKET="${STAGING_BUCKET:-gs://class-demo}"
+
 
 echo "✓ Environment configured:"
 echo "  PROJECT_ID: ${PROJECT_ID}"

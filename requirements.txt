@@ -1,0 +1,4 @@
+google-adk (>=1.14.0,<2.0.0)
+google-cloud-aiplatform[agent_engines] (>=1.111.0,<2.0.0)
+google-genai (>=1.38.0,<2.0.0)
+pydantic (>=2.11.7,<3.0.0)

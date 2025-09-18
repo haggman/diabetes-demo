@@ -1,7 +1,6 @@
 import vertexai
 from diabetes_agent.agent import root_agent
 from vertexai import agent_engines
-from vertexai.preview.reasoning_engines import AdkApp
 
 vertexai.init(
     project="patrick-haggerty",
@@ -10,8 +9,8 @@ vertexai.init(
 )
 
 
-"""Creates an agent engine for Academic Research."""
-adk_app = AdkApp(agent=root_agent, enable_tracing=True)
+
+adk_app = agent_engines.AdkApp(agent=root_agent, enable_tracing=True)
 
 remote_agent = agent_engines.create(
     adk_app,
