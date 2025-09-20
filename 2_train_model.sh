@@ -10,7 +10,7 @@ OPTIONS (
   * FROM `demo_diabetes.diabetes_raw`;
 '
 
-bq query --use_legacy_sql=false '
+bq query --use_legacy_sql=false <<'SQL'
 CREATE OR REPLACE TABLE FUNCTION `demo_diabetes.predict_diabetes`(
   gender               STRING,
   age                  FLOAT64,
@@ -63,4 +63,4 @@ AS (
     TABLE input
   )
 );
-'
+SQL
