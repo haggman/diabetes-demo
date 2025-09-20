@@ -1,51 +1,128 @@
 # Demo: BigQuery ML + ADK Agent for Diabetes Prediction
 
 ## Overview
-This demo showcases how Google Cloud's BigQuery ML and Agent Development Kit (ADK) can accelerate healthcare analytics and AI development. We'll build a diabetes risk prediction model using real-world data, then create an intelligent agent that can answer questions, analyze the dataset, and provide personalized risk assessments - all without complex infrastructure setup.
 
-**Key Technologies:**
+This demo showcases how Google Cloud's BigQuery ML and Agent Development Kit (ADK) can accelerate healthcare analytics and AI development. You'll build a diabetes risk prediction model using real-world data, then create an intelligent agent that can answer questions, analyze the dataset, and provide personalized risk assessments - all without complex infrastructure setup.
+
+### What You'll Build
+
+- A machine learning model trained on 100,000 patient records
+- A conversational AI agent that combines:
+  - General diabetes knowledge from web search
+  - Dataset analytics using BigQuery
+  - Personalized risk predictions using your trained model
+  - Appropriate medical disclaimers and safety guidelines
+
+### Key Technologies
+
 - **BigQuery**: Google's serverless data warehouse for massive-scale analytics
 - **BigQuery ML (BQML)**: Train and deploy ML models using just SQL
 - **Agent Development Kit (ADK)**: Google's framework for building production-ready AI agents
 
-**Dataset:** Public diabetes prediction dataset with 100,000 patient records including demographics, medical history, and lab results.
+### Dataset
+
+Public diabetes prediction dataset with 100,000 patient records including demographics, medical history, and lab results.
 
 > ⚠️ **Clinical Disclaimer:** This is an educational demonstration only. The model and predictions are NOT validated for clinical use and should NOT be used for medical diagnosis or treatment decisions.
 
 ---
-Prerequisits:
-- A project in Google Cloud 
-- Access to Gemini, BigQuery, and if you do the optional deployment, Agent Engine
-- Either the GCP SDK setup to work with the project, or Cloud Shell
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+1. **Google Cloud Project**: An active GCP project with billing enabled
+2. **Required APIs**: Access to Gemini and BigQuery
+3. **Cloud Shell**: Recommended environment (has gcloud CLI pre-installed)
+   - Alternative: Local machine with gcloud SDK configured
+
 ---
 
-## What We'll Build
-...
+## Setup Instructions
 
----
+### Step 1: Enable APIs
 
-If you haven't already done so, visit the Vertex AI console and **Enable all recommended APIs**
+1. Navigate to the [Vertex AI Console](https://console.cloud.google.com/vertex-ai)
+2. Click **"Enable all recommended APIs"** when prompted
 
-Clone down this repo either into Cloud Shell or onto your local machine `https://github.com/haggman/diabetes-demo`
+### Step 2: Clone the Repository
 
-Change into the `diabetes-demo` folder
+Open the Cloud Shell terminal (or your local terminal) and run:
 
-Open and examine the `activate.sh`
+```bash
+git clone https://github.com/haggman/diabetes-demo
+cd diabetes-demo
+```
 
-. activate.sh
+### Step 3: Configure Environment Variables
 
-Open and examine `1_setup_bq.sh`. This pulls the diabetes dataset and loads it into BigQuery
+1. Review the configuration script:
 
-. 1_setup_bq.sh
+```bash
+edit activate.sh
+```
 
-Jump over the BQ and take a few moments to explore the diabetes_raw table
+2. Activate the environment:
+```bash
+source activate.sh
+```
 
-Open and examine `2_train_model.sh`. Note how this uses BQML to train a diabetes prediction model and then exposes the model as a TVF (table-valued function)
+You should see:
+```
+✔ Environment configured:
+  PROJECT_ID: your-project-id
+  DATASET: demo_diabetes
+  LOCATION: US
 
-Either run the two statements in the BQ page or execute . 2_train_model.sh
+Ready to proceed with demo setup!
+```
 
-Switch to the BQ Studio UI and execute the 2 below queries to explore the model
--- 1. Overall model metrics
+### Step 4: Load Data into BigQuery
+
+1. Review the setup script to understand what it does:
+
+```bash
+edit 1_setup_bq.sh
+```
+
+2. Execute the script to create the dataset and load data:
+```bash
+source 1_setup_bq.sh
+```
+
+3. Verify the data loaded correctly:
+   - Go to [BigQuery Console](https://console.cloud.google.com/bigquery)
+   - Navigate to your project → `demo_diabetes` dataset → `diabetes_raw` table
+   - Click **PREVIEW** to examine the data
+   - Note the columns: gender, age, hypertension, heart_disease, smoking_history, bmi, HbA1c_level, blood_glucose_level, diabetes
+
+### Step 5: Train the ML Model
+
+1. Review the model training script:
+
+```bash
+edit 2_train_model.sh
+```
+
+This script:
+- Creates a logistic regression model for diabetes prediction
+- Sets up a table-valued function (TVF) for easy predictions and that handles missing data with population averages (calculated from the study dataset)
+
+2. Execute the script:
+
+```bash
+source 2_train_model.sh
+```
+
+Training takes approximately 1-3 minutes.
+
+### Step 6: Explore the Model
+
+Open the BigQuery console and run these queries to understand your model:
+
+#### Query 1: Model Performance Metrics
+
+```sql
 SELECT 
   ROUND(roc_auc, 4) as AUC_ROC,
   ROUND(accuracy, 4) as accuracy,
@@ -54,8 +131,10 @@ SELECT
   ROUND(f1_score, 4) as f1_score,
   ROUND(log_loss, 4) as log_loss
 FROM ML.EVALUATE(MODEL `demo_diabetes.diabetes_model`);
+```
 
--- 2. Feature weights (what factors matter most?)
+#### Query 2: Feature Importance
+```sql
 SELECT 
   processed_input as feature,
   ROUND(ABS(weight), 4) as importance,
@@ -67,10 +146,14 @@ FROM ML.WEIGHTS(MODEL `demo_diabetes.diabetes_model`)
 WHERE processed_input != '__INTERCEPT__'
 ORDER BY ABS(weight) DESC
 LIMIT 10;
+```
 
-Now let's do some predictions using SQL:
+### Step 7: Test Predictions
 
--- Example 1: Prediction with complete patient data
+Try these example predictions in BigQuery:
+
+#### Example 1: Direct Model Prediction
+```sql
 SELECT 
   'Complete Data Example' as scenario,
   ROUND(predicted_diabetes_probs[OFFSET(1)].prob * 100, 1) AS diabetes_probability_pct,
@@ -90,96 +173,206 @@ FROM ML.PREDICT(
     'former' as smoking_history,
     28.5 as bmi,
     6.8 as HbA1c_level,
-    145 as blood_glucose_level  -- INT64, not FLOAT64
+    145 as blood_glucose_level
   )
 );
+```
 
--- Example 2: Same prediction using the TVF
+#### Example 2: Using the Table-Valued Function
+```sql
 SELECT * FROM `demo_diabetes.predict_diabetes`(
-  'Male',                  -- gender
-  55.0,                    -- age
-  1,                       -- hypertension
-  0,                       -- heart_disease
-  'former',                -- smoking_history
-  28.5,                    -- bmi
-  6.8,                     -- HbA1c_level
-  145                      -- blood_glucose_level
+  'Male',     -- gender
+  55.0,       -- age
+  1,          -- hypertension (1=yes, 0=no)
+  0,          -- heart_disease (1=yes, 0=no)
+  'former',   -- smoking_history
+  28.5,       -- bmi
+  6.8,        -- HbA1c_level
+  145         -- blood_glucose_level
 );
+```
 
-Switch back to the Cloud Shell terminal and setup your Python Env
+---
 
+## Loadup the AI Agent
+
+### Step 8: Setup Python Environment
+
+1. Switch back to the Cloud Shell terminal then create and activate a Python virtual environment:
 ```bash
 python3 -m venv venv
 source venv/bin/activate
+```
 
+2. Install required packages (including the ADK):
+```bash
 pip install --upgrade pip wheel
 pip install -r requirements.txt
 ```
 
-Test to make sure ADK is installed and working properly
-
+3. Verify ADK installation:
 ```bash
 adk --version
 ```
-Open and examine diabetes_agent/agent.py
-Things to note:
-- The ADK's native BigQuery and Google Search tool setups
-- The search agent (since a single agent can't use two search tools directly)
-- The root agent, with access to the search agent and the BQ toolset
 
-Open and examine diabetes_agent/prompts.py and notice how the description and instructions are setup.
+You should see the ADK version number (e.g., `1.14.1` or higher).
 
+### Step 9: Explore the Agent Architecture
 
-### Test the Complete Agent
+1. **Review the agent configuration** (`diabetes_agent/agent.py`):
+   - BigQuery tool setup for data analysis
+   - Search agent for web information
+   - Root agent orchestrating both capabilities
 
-Start the ADK test interface:
+2. **Review the prompts** (`diabetes_agent/prompts.py`):
+   - Agent personality and behavior
+   - Risk assessment workflow
+   - Safety guidelines and disclaimers
 
+### Step 10: Test the Agent
+
+1. Start the ADK development interface:
 ```bash
 adk web
 ```
 
-Open the web interface and select **diabetes_agent**. Test with progressively complex queries:
+2. Click the `http://127.0.0.1:8080` link to open the agent in your browser.
 
-**Test 1 - General Knowledge:**
+3. Select **diabetes_agent** from the dropdown menu
+
+4. Test with progressively complex queries:
+
+#### Test 1 - General Knowledge
 ```
 What are the main risk factors for type 2 diabetes?
 ```
+*Expected: The agent uses web search to provide evidence-based information*
 
-**Test 2 - Dataset Analysis:**
+#### Test 2 - Dataset Analysis
 ```
-What percentage of the people in your diabetes study dataset actually had diabetes?
+What percentage of people in your diabetes study dataset actually had diabetes?
 ```
+*Expected: The agent queries BigQuery to analyze the diabetes_raw table*
 
-**Test 3 - Complex Query:**
+#### Test 3 - Complex Analysis
 ```
 How does BMI correlate with diabetes risk in the dataset?
 ```
+*Expected: The agent runs SQL to analyze patterns in the data*
 
-**Test 4 - Risk Assessment:**
+#### Test 4 - Risk Assessment
 ```
 Can you assess my diabetes risk?
 ```
-Follow the conversational flow as the agent gathers information.
+*Expected: The agent guides you through providing information and then uses the prediction model. You might try this a couple of times with both partial and complete data.*
 
 
+---
 
+## Understanding the Architecture
 
-### What You've Built
+### Data Flow
 
-Your diabetes risk assessment agent now:
-- ✅ Answers general diabetes questions using web search
-- ✅ Analyzes patterns in your 100k patient dataset  
-- ✅ Provides personalized risk assessments using your ML model
-- ✅ Maintains appropriate medical disclaimers
-- ✅ Guides users through conversational risk assessment
+```
+User Query → ADK Agent → Decision
+                ↓
+    ┌───────────┴───────────┐
+    ↓                       ↓
+BigQuery Tools          Search Agent
+    ↓                       ↓
+- Dataset queries      - Web search
+- ML predictions       - Medical info
+    ↓                       ↓
+    └───────────┬───────────┘
+                ↓
+        Combined Response
+```
 
-The architecture demonstrates how ADK agents can combine:
-- Built-in LLM knowledge
-- External web information
-- Private analytical data
-- Machine learning predictions
+### Key Components
 
-This same pattern works for any healthcare or life sciences application where you need to blend general knowledge with specific analytical capabilities.
+1. **BigQuery Dataset** (`demo_diabetes`)
+   - `diabetes_raw`: Training data with 100k records
+   - `diabetes_model`: Trained logistic regression model
+   - `predict_diabetes`: TVF for easy predictions
+
+2. **ADK Agent**
+   - **Root Agent**: Orchestrates the conversation
+   - **Search Agent**: Retrieves web information
+   - **BigQuery Tools**: Analyzes data and runs predictions
+
+3. **Safety Features**
+   - Medical disclaimers on all predictions
+   - Educational purpose emphasis
+   - Encouragement to consult healthcare providers
+
+---
+
+## Customization Ideas
+
+### Enhance the Model
+- Add feature engineering in the SQL
+- Try different model types (DNN, XGBoost)
+- Implement cross-validation
+
+### Expand Agent Capabilities
+- Add visualization generation
+- Implement conversation memory
+- Create follow-up appointment scheduling
+
+### Dataset Improvements
+- Add temporal analysis
+- Include medication history
+- Incorporate genetic markers
+
+---
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+| Issue | Solution |
+|-------|----------|
+| **Permission denied on BigQuery** | Ensure you have BigQuery Admin role: `gcloud projects add-iam-policy-binding ${PROJECT_ID} --member="user:your-email@domain.com" --role="roles/bigquery.admin"` |
+| **Dataset not found** | Verify PROJECT_ID is set correctly and dataset was created in Step 4 |
+| **Model training fails** | Check for NULL values in data; ensure dataset location is US |
+| **ADK web won't start** | Ensure virtual environment is activated and requirements installed |
+| **Agent can't find data** | Verify PROJECT_ID environment variable is set in your shell |
+| **Predictions return NULL** | Ensure all input parameters use correct data types (see TVF specification) |
+
+### Debugging Commands
+
+```bash
+# Check environment variables
+echo $PROJECT_ID
+echo $BQ_DATASET
+
+# Verify dataset exists
+bq ls -d --project_id=$PROJECT_ID
+
+# Check model status
+bq show --model demo_diabetes.diabetes_model
+
+# Test ADK installation
+python -c "import google.adk; print('ADK OK')"
+```
+
+---
+
+## Clean Up
+
+To avoid incurring charges, clean up resources when done:
+
+```bash
+# Delete the BigQuery dataset and all contents
+bq rm -r -f -d ${PROJECT_ID}:demo_diabetes
+
+# Deactivate Python environment
+deactivate
+
+# Optional: Remove local files
+cd ..
+rm -rf diabetes-demo
+```
 
 ---
 
@@ -188,26 +381,27 @@ This same pattern works for any healthcare or life sciences application where yo
 - **BigQuery ML Documentation**: https://cloud.google.com/bigquery-ml/docs
 - **ADK Documentation**: https://google.github.io/adk-docs/
 - **Healthcare & Life Sciences Solutions**: https://cloud.google.com/solutions/healthcare-life-sciences
-- **ADK Sample Code**: https://github.com/google/adk-samples
-- **Diabetes Prediction Dataset**: https://www.kaggle.com/datasets/iammustafatz/diabetes-prediction-dataset
+- **Diabetes Dataset on Kaggle**: https://www.kaggle.com/datasets/iammustafatz/diabetes-prediction-dataset
 
 ---
 
-## Troubleshooting
+## Security & Compliance Note
 
-**Common Issues:**
+This demo is for educational purposes only. In production healthcare applications, ensure:
+- HIPAA compliance for US healthcare data
+- Proper encryption and access controls
+- Audit logging for all data access
+- Appropriate consent and privacy measures
+- Clinical validation before any medical use
 
-1. **Permission Errors**: Ensure your account has BigQuery Admin role
-2. **Location Mismatches**: Keep all resources in the same location (US)
-3. **Model Training Fails**: Check for NULL values in training data
-4. **Agent Can't Access BigQuery**: Verify ADK service account has BigQuery access
-5. **Predictions Return NULL**: Ensure all input parameters are provided with correct types
+---
 
-**Quick Fixes:**
-```bash
-# Grant BigQuery access to ADK service account
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member="serviceAccount:adk-agent@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/bigquery.user"
-```
+## Questions or Issues?
 
+- Check the [troubleshooting section](#troubleshooting) above
+- Review the [ADK documentation](https://google.github.io/adk-docs/)
+- Explore [BigQuery ML tutorials](https://cloud.google.com/bigquery-ml/docs/tutorials)
+
+---
+
+**Remember**: This is an educational demonstration showcasing the integration of BigQuery ML and ADK. The predictions are NOT clinically validated and should NOT be used for medical decisions. Always consult healthcare professionals for medical advice.
