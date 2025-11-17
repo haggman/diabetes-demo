@@ -198,6 +198,8 @@ SELECT * FROM `demo_diabetes.predict_diabetes`(
 
 ### Step 8: Setup Python Environment
 
+Note: the next three steps may also be accomplished by running `source 3_setup_python.sh`
+
 1. Switch back to the Cloud Shell terminal then create and activate a Python virtual environment:
 ```bash
 python3 -m venv venv
