@@ -235,7 +235,7 @@ You should see the ADK version number (e.g., `1.14.1` or higher).
 
 1. Start the ADK development interface:
 ```bash
-adk web
+adk web --allow_origins "*"
 ```
 
 2. Click the `http://127.0.0.1:8080` link to open the agent in your browser.
