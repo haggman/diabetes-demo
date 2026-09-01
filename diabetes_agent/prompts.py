@@ -4,9 +4,27 @@ Diabetes Risk Assessment Agent - Instructions and Configuration
 
 import os
 
+import google.auth
+
 # Configuration
-PROJECT_ID = os.environ.get('PROJECT_ID', 'your-project-id')
-DATASET_ID = 'demo_diabetes'
+#
+# PROJECT_ID is exported by activate.sh when you run locally. That variable does
+# not exist inside the Agent Runtime container, so fall back to
+# GOOGLE_CLOUD_PROJECT (written into diabetes_agent/.env by activate.sh and
+# carried into the deployment), and then to the project behind whatever
+# credentials the container is running as.
+try:
+    _, _ADC_PROJECT = google.auth.default()
+except Exception:  # no credentials available yet
+    _ADC_PROJECT = None
+
+PROJECT_ID = (
+    os.environ.get("PROJECT_ID")
+    or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    or _ADC_PROJECT
+    or "your-project-id"
+)
+DATASET_ID = os.environ.get("BQ_DATASET", "demo_diabetes")
 TVF_NAME = f"{DATASET_ID}.predict_diabetes"
 
 # Agent Description

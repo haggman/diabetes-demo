@@ -1,5 +1,13 @@
-google-adk (>=1.18.0,<2.0.0)
-google-cloud-aiplatform[agent_engines] (>=1.127.0,<2.0.0)
-google-genai (>=1.50.1,<2.0.0)
-pydantic (>=2.12.4,<3.0.0)
-agent-starter-pack (>=0.20.3,<1.0.0)
+# Runtime dependencies for the diabetes agent.
+#
+# This file is also what gets installed into the Agent Runtime container:
+# diabetes_agent/requirements.txt is a symlink back to this file, and
+# `adk deploy agent_engine` follows the symlink when it stages the agent.
+#
+# google-adk[gcp] is required (not plain google-adk): the BigQuery toolset
+# needs google-cloud-bigquery AND google-cloud-dataplex, and the base package
+# installs neither.
+google-adk[gcp] (>=2.8.0,<3.0.0)
+google-cloud-aiplatform[agent_engines] (>=1.148.1,<2.0.0)
+google-genai (>=2.19,<3.0.0)
+pydantic (>=2.12,<3.0.0)
