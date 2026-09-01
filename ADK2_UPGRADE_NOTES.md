@@ -82,9 +82,9 @@ resolves to the deployed project.
 
 Sourcing it generates `diabetes_agent/.env` from the current shell:
 
-    GOOGLE_GENAI_USE_VERTEXAI=1
+    GOOGLE_GENAI_USE_ENTERPRISE=1
     GOOGLE_CLOUD_PROJECT=<your project>
-    GOOGLE_CLOUD_LOCATION=<AGENT_REGION>
+    GOOGLE_CLOUD_LOCATION=global
     PROJECT_ID=<your project>
     BQ_DATASET=<BQ_DATASET>
     AGENT_MODEL=<AGENT_MODEL>
@@ -94,15 +94,66 @@ reads that file and turns each line into an environment variable on the running
 agent (and lifts `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` to decide where
 to deploy unless `--project` / `--region` are passed, which `4_deploy.sh` does).
 
-It also fixes a smaller problem: `.env` is gitignored, so anyone cloning the repo
-previously got no `GOOGLE_GENAI_USE_VERTEXAI=1` and hit a confusing failure on
-first run. `diabetes_agent/.env.example` is now committed as documentation.
+Correction to an earlier note: `diabetes_agent/.env` matches a `.gitignore`
+pattern but was committed before that rule existed, so it **is** tracked and does
+ship with a clone. The real problem was that it shipped one machine's settings and
+now a deprecated flag. Generating it means it always matches the project you are
+actually in. `diabetes_agent/.env.example` is committed as documentation of the
+format.
 
-New variables: `AGENT_REGION` (default `us-central1`), `AGENT_MODEL`,
-`AGENT_DISPLAY_NAME`. `STAGING_BUCKET` is kept but commented — `--staging_bucket`
-is deprecated and unused for deployment now.
+Because the file is tracked, regenerating it shows up as a git modification every
+time you switch projects. If that gets annoying, untrack it and let the ignore
+rule do its job:
 
-### 6. New `4_deploy.sh`
+    git rm --cached diabetes_agent/.env
+
+(While you are in there: `diabetes_agent/__pycache__/*.pyc` is also tracked from
+an early commit and can go the same way.)
+
+New variables: `GEMINI_LOCATION` (default `global`), `AGENT_REGION` (default
+`us-central1`), `AGENT_MODEL`, `AGENT_DISPLAY_NAME`. `STAGING_BUCKET` is kept but
+commented — `--staging_bucket` is deprecated and unused for deployment now.
+
+Two subtleties, both verified in the 2.8.0 CLI:
+
+- The deploy **pops** `GOOGLE_CLOUD_PROJECT` out of the variable set after using it
+  to choose the deployment target, so that name does not reach the running
+  container. `PROJECT_ID` is not popped — which is why `activate.sh` writes both
+  and why `prompts.py` checks `PROJECT_ID` first.
+- `GOOGLE_CLOUD_LOCATION` is **not** popped. It reaches the container, which is
+  what we want, because it is the model location. See item 6.
+
+### 6. Model location vs deploy region, and the enterprise flag
+
+`GOOGLE_CLOUD_LOCATION` is now `global`, because the current Gemini models are
+served globally rather than from a region. That creates a trap worth showing the
+class: the ADK CLI reads `GOOGLE_CLOUD_LOCATION` from the `.env` and uses it as the
+**deployment region** whenever `--region` is not passed — so a bare
+`adk deploy agent_engine diabetes_agent` would try to deploy the agent to `global`,
+which Agent Runtime will not accept.
+
+Three things keep the two apart:
+
+- `activate.sh` exports `GEMINI_LOCATION` (default `global`, written into the
+  `.env` as `GOOGLE_CLOUD_LOCATION`) and `AGENT_REGION` (default `us-central1`) as
+  separate variables, and prints them on labelled lines.
+- `4_deploy.sh` always passes `--region="${AGENT_REGION}"`, which takes precedence.
+  The deploy prints ``Ignoring GOOGLE_CLOUD_LOCATION in .env as `--region` was
+  explicitly passed`` — expected and correct.
+- `4_deploy.sh` refuses to run when `AGENT_REGION` is `global`, and says where
+  `global` does belong.
+
+There are now three "locations" in the demo and they are all different:
+`BQ_LOCATION=US` (dataset), `GEMINI_LOCATION=global` (model),
+`AGENT_REGION=us-central1` (hosted agent). The README calls this out in Step 3.
+
+`GOOGLE_GENAI_USE_VERTEXAI` was also replaced with `GOOGLE_GENAI_USE_ENTERPRISE=1`.
+The old name still works — both ADK and google-genai read it — but ADK warns
+`GOOGLE_GENAI_USE_VERTEXAI is deprecated, please use GOOGLE_GENAI_USE_ENTERPRISE
+instead`, and google-genai resolves a conflict between the two in favour of the
+new name.
+
+### 7. New `4_deploy.sh`
 
 Enables the APIs, creates the Reasoning Engine service agent, grants it BigQuery
 roles, sanity-checks the agent folder, and deploys. Set `AGENT_ENGINE_ID` to
@@ -114,13 +165,13 @@ and that identity starts with no BigQuery access. The failure mode is
 distinctive — the agent deploys, answers general questions via search, and fails
 only on data questions.
 
-### 7. `README.md`
+### 8. `README.md`
 
 New Steps 11–15 covering what travels with the agent, API enablement, the IAM
 grants (with the gcloud commands spelled out), deploying, and testing the deployed
 agent. Plus: the ADK version check now says 2.8.0, the naming table
 (Agent Runtime / `agent_engine` / `reasoningEngines`), a callout listing the
-deploy flags that older tutorials use and 2.x has deprecated, seven new
+deploy flags that older tutorials use and 2.x has deprecated, ten new
 troubleshooting rows for the failure modes above, and a cleanup step that deletes
 the deployed agent instead of leaving it running.
 

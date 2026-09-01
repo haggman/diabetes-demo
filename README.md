@@ -72,11 +72,12 @@ You should see:
 ```
 ✓ Wrote diabetes_agent/.env
 ✓ Environment configured:
-  PROJECT_ID:   your-project-id
-  DATASET:      demo_diabetes
-  BQ LOCATION:  US
-  AGENT REGION: us-central1
-  AGENT MODEL:  gemini-flash-latest
+  PROJECT_ID:      your-project-id
+  DATASET:         demo_diabetes
+  BQ LOCATION:     US
+  MODEL:           gemini-flash-latest
+  MODEL LOCATION:  global   (where Gemini is called)
+  DEPLOY REGION:   us-central1   (where the agent is hosted)
 
 Ready to proceed with demo setup!
 ```
@@ -85,6 +86,14 @@ Ready to proceed with demo setup!
 your project id reaches the agent - both when you run it locally and when you
 deploy it to Agent Runtime later. Re-source `activate.sh` any time you switch
 projects.
+
+> **Three locations, and they are all different.** `BQ_LOCATION` (`US`) is where
+> the BigQuery dataset lives. `GEMINI_LOCATION` (`global`) is where the model is
+> served - the current Gemini models are global-only, which is why this is not a
+> region. `AGENT_REGION` (`us-central1`) is where the deployed agent is hosted;
+> Agent Runtime requires a real region and will not accept `global`. Worth
+> pointing out to students, because all three end up in different variables that
+> all look like "location".
 
 ### Step 4: Load Data into BigQuery
 
@@ -324,17 +333,37 @@ cat diabetes_agent/.env
 ```
 
 ```
-GOOGLE_GENAI_USE_VERTEXAI=1
+GOOGLE_GENAI_USE_ENTERPRISE=1
 GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_CLOUD_LOCATION=us-central1
+GOOGLE_CLOUD_LOCATION=global
 PROJECT_ID=your-project-id
 BQ_DATASET=demo_diabetes
 AGENT_MODEL=gemini-flash-latest
 ```
 
-`GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` do double duty: the deploy
-also uses them to decide *where* to deploy, unless you pass `--project` and
-`--region` explicitly (`4_deploy.sh` passes both).
+Two details in that file are worth a minute in class:
+
+**`GOOGLE_CLOUD_LOCATION=global` is the model location, not the deploy region.**
+The current Gemini models are served globally, so that is where the model calls
+have to go. Agent Runtime, on the other hand, needs a real region. The ADK CLI
+will happily read `GOOGLE_CLOUD_LOCATION` out of this file and use it as the
+deployment region if you let it - which would try to deploy to `global` and fail.
+`4_deploy.sh` prevents that by always passing `--region="${AGENT_REGION}"`, which
+takes precedence. Expect this message during the deploy, and expect it to be
+correct:
+
+```
+Ignoring GOOGLE_CLOUD_LOCATION in .env as `--region` was explicitly passed and takes precedence
+```
+
+**`GOOGLE_GENAI_USE_ENTERPRISE` replaced `GOOGLE_GENAI_USE_VERTEXAI`.** The old
+name still works but is deprecated and warns. If both are set with conflicting
+values, the new one wins.
+
+One more subtlety: the deploy *consumes* `GOOGLE_CLOUD_PROJECT` to decide where
+to deploy and removes it from the variables handed to the container, so it is
+`PROJECT_ID` in this file that actually reaches the running agent. That is why
+`activate.sh` writes both.
 
 ### Step 12: Enable the APIs
 
@@ -530,6 +559,9 @@ BigQuery Tools          Search Agent
 | **`ImportError: cannot import name 'dataplex_v1'`** | The BigQuery toolset needs the `[gcp]` extra. Reinstall with `pip install -r requirements.txt` - the entry must be `google-adk[gcp]`, not `google-adk` |
 | **`ResolutionImpossible` on pip install** | Install everything from `requirements.txt` in one command rather than package by package, so pip can resolve `google-genai` and OpenTelemetry versions jointly |
 | **`[EXPERIMENTAL] feature FeatureName.GOOGLE_CREDENTIALS_CONFIG is enabled`** | Harmless warning from `BigQueryCredentialsConfig` on startup. Ignore it |
+| **`GOOGLE_GENAI_USE_VERTEXAI is deprecated` warning** | Rename it to `GOOGLE_GENAI_USE_ENTERPRISE` in your `.env`, or just re-run `source activate.sh` |
+| **Model not found / not available in this location** | The current Gemini models are global-only. Confirm `GOOGLE_CLOUD_LOCATION=global` in `diabetes_agent/.env` - a region like `us-central1` there will fail for these models |
+| **Deploy fails with an invalid location** | You deployed without `--region`, so the CLI used `GOOGLE_CLOUD_LOCATION=global` from the `.env` as the deployment region. Use `source 4_deploy.sh`, or pass `--region=us-central1` yourself |
 | **Agent talks about project `your-project-id`** | `PROJECT_ID` was not set. Run `source activate.sh`, and for a deployed agent confirm `diabetes_agent/.env` had the right project *before* you deployed |
 | **Deployed agent: "permission denied" on any data question** | The Reasoning Engine service agent has no BigQuery access. Run Step 13, then ask again - no redeploy needed |
 | **Deploy installs the wrong dependencies** | `adk deploy` reads `diabetes_agent/requirements.txt`. If that symlink is missing it writes a minimal file with no BigQuery support. Recreate it: `ln -sfn ../requirements.txt diabetes_agent/requirements.txt` |

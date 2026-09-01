@@ -12,6 +12,24 @@
 : "${PROJECT_ID:?PROJECT_ID is not set. Run: source activate.sh}"
 : "${AGENT_REGION:?AGENT_REGION is not set. Run: source activate.sh}"
 
+# Two locations are in play and they are not the same thing:
+#
+#   GOOGLE_CLOUD_LOCATION (in diabetes_agent/.env) = "global"
+#       where the MODEL is served. The current Gemini models are global-only.
+#   AGENT_REGION (passed below as --region)        = "us-central1"
+#       where the AGENT is hosted. Agent Runtime requires a real region.
+#
+# This script always passes --region explicitly, which takes precedence over
+# GOOGLE_CLOUD_LOCATION in the .env file. The deploy will print
+# "Ignoring GOOGLE_CLOUD_LOCATION in .env as `--region` was explicitly passed"
+# - that message is expected and correct here.
+if [[ "${AGENT_REGION}" == "global" ]]; then
+  echo "ERROR: AGENT_REGION cannot be 'global'. Agent Runtime needs a region," >&2
+  echo "       for example us-central1. 'global' is the MODEL location and" >&2
+  echo "       belongs in GEMINI_LOCATION, not AGENT_REGION." >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 echo "=== 1/4  Enabling APIs ==="
 gcloud services enable \
   aiplatform.googleapis.com \
@@ -65,6 +83,9 @@ fi
 echo "requirements.txt -> $(readlink diabetes_agent/requirements.txt 2>/dev/null || echo 'local copy')"
 echo "Environment the agent will be deployed with:"
 sed 's/^/  /' diabetes_agent/.env
+echo ""
+echo "  Model calls go to:  $(grep '^GOOGLE_CLOUD_LOCATION=' diabetes_agent/.env | cut -d= -f2)"
+echo "  Agent is hosted in: ${AGENT_REGION}"
 
 echo ""
 echo "=== 4/4  Deploying to Agent Runtime ==="
