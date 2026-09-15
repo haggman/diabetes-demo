@@ -1,0 +1,11 @@
+{
+  "name": "Diabetes Demo (BigQuery ML + ADK)",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "adk-web",
+      "command": "source .cursor/activate-env.sh && adk web --host 0.0.0.0 --port 8080 --allow_origins '*'"
+    }
+  ],
+  "ports": [8080]
+}
